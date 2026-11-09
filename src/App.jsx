@@ -1,5 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Settings2, Layers, Plus, Trash2, Activity, Info, Link as LinkIcon, CheckCircle2 } from 'lucide-react';
+import { Settings2, Layers, Plus, Trash2, Activity, Info, Link as LinkIcon, CheckCircle2, GripVertical } from 'lucide-react';
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const SPEED_OF_LIGHT = 299792458; // m/s
 
@@ -83,6 +86,19 @@ function calculateTMM(f_GHz, layers, theta0_deg, polarization) {
 
 // Stack-profile layer heights: strictly proportional to thickness (true scale)
 const layerSizeStyle = (d) => ({ flex: `${d} 1 0px`, minHeight: 0 });
+
+// Layer card that can be reordered by dragging its grip handle.
+// `children` is a render function that receives the handle's ref and props
+// (props are null when the card is locked in place).
+const SortableCard = ({ id, locked, className, children }) => {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: locked });
+  const style = { transform: CSS.Translate.toString(transform), transition, zIndex: isDragging ? 20 : undefined };
+  return (
+    <div ref={setNodeRef} style={style} className={`${className} ${isDragging ? 'shadow-lg ring-2 ring-blue-300' : ''}`}>
+      {children({ handleRef: setActivatorNodeRef, handleProps: locked ? null : { ...attributes, ...listeners } })}
+    </div>
+  );
+};
 
 // --- Custom Interactive Chart Component ---
 const SimulationChart = ({ data, fMin, fMax, yAxisMode, yMin, yMax, passbands, avgReflection }) => {
@@ -402,6 +418,26 @@ export default function App() {
     }
   };
 
+  // Drag-to-reorder. A semi-infinite last layer is the exit medium, so it stays
+  // locked at the bottom and is not a drop target.
+  const dragSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  const lockedLayerId = layers.length > 0 && layers[layers.length - 1].isInfinite ? layers[layers.length - 1].id : null;
+  const sortableIds = layers.filter(l => l.id !== lockedLayerId).map(l => l.id);
+
+  const handleDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id || active.id === lockedLayerId) return;
+    setLayers(ls => {
+      const from = ls.findIndex(l => l.id === active.id);
+      let to = ls.findIndex(l => l.id === over.id);
+      // Never move a layer below a locked semi-infinite exit medium
+      if (lockedLayerId !== null) to = Math.min(to, ls.length - 2);
+      return from === to ? ls : arrayMove(ls, from, to);
+    });
+  };
+
   const removeLayer = (id) => setLayers(layers.filter(l => l.id !== id));
   const updateLayer = (id, key, value) => setLayers(layers.map(l => l.id === id ? { ...l, [key]: value } : l));
 
@@ -557,19 +593,31 @@ export default function App() {
             </div>
           </div>
 
+          <DndContext sensors={dragSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={sortableIds} strategy={rectSortingStrategy}>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
             {layers.map((layer, index) => {
               const isLastLayer = index === layers.length - 1;
               return (
-                <div key={layer.id} className={`p-3 bg-slate-50 rounded-lg border space-y-3 relative transition-colors ${layer.isInfinite ? 'border-indigo-200' : 'border-slate-200'}`}>
+                <SortableCard key={layer.id} id={layer.id} locked={layer.id === lockedLayerId} className={`p-3 bg-slate-50 rounded-lg border space-y-3 relative transition-colors ${layer.isInfinite ? 'border-indigo-200' : 'border-slate-200'}`}>
+                  {({ handleRef, handleProps }) => (<>
                   <div className="flex justify-between items-center">
-                    <input 
+                    <div className="flex items-center space-x-1">
+                    {handleProps ? (
+                      <button ref={handleRef} {...handleProps} title="Drag to reorder" className="text-slate-400 hover:text-slate-600 cursor-grab active:cursor-grabbing touch-none -ml-1">
+                        <GripVertical className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <span className="w-4 h-4 -ml-1" />
+                    )}
+                    <input
                       type="text" 
                       placeholder={`Layer ${index + 1}`}
                       value={layer.label}
                       onChange={e => updateLayer(layer.id, 'label', e.target.value)}
                       className="text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded px-1.5 py-0.5 w-24 focus:outline-none focus:border-blue-500"
                     />
+                    </div>
                     <button onClick={() => removeLayer(layer.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                   
@@ -599,10 +647,13 @@ export default function App() {
                       <label htmlFor="infToggle" className="text-[10px] font-bold text-slate-600 uppercase cursor-pointer">Semi-Infinite Substrate</label>
                     </div>
                   )}
-                </div>
+                  </>)}
+                </SortableCard>
               );
             })}
           </div>
+          </SortableContext>
+          </DndContext>
         </div>
 
         {/* Global Settings */}
