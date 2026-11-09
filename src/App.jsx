@@ -81,9 +81,8 @@ function calculateTMM(f_GHz, layers, theta0_deg, polarization) {
   return { R: R_avg, T: 1 - R_avg };
 }
 
-// Stack-profile layer heights: proportional to thickness, but never shorter
-// than one line of label text so thin neighboring layers don't overlap
-const layerSizeStyle = (d) => ({ flex: `${d} 1 0px`, minHeight: '14px' });
+// Stack-profile layer heights: strictly proportional to thickness (true scale)
+const layerSizeStyle = (d) => ({ flex: `${d} 1 0px`, minHeight: 0 });
 
 // --- Custom Interactive Chart Component ---
 const SimulationChart = ({ data, fMin, fMax, yAxisMode, yMin, yMax, passbands, avgReflection }) => {
@@ -454,8 +453,14 @@ export default function App() {
               <span>Stack Profile</span>
             </div>
             
-            <div className="flex justify-center mb-1 shrink-0 text-yellow-500">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="2" x2="12" y2="22"></line><polyline points="19 15 12 22 5 15"></polyline></svg>
+            {/* Incidence arrow over the layers; total finite thickness over the thickness column */}
+            <div className="flex items-end mb-1 shrink-0 px-px">
+              <div className="flex-1 flex justify-center text-yellow-500">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="2" x2="12" y2="22"></line><polyline points="19 15 12 22 5 15"></polyline></svg>
+              </div>
+              <div className="w-20 pl-1.5 border-l border-transparent text-[10px] font-semibold text-slate-700 whitespace-nowrap">
+                Total {parseFloat(layers.filter(l => !l.isInfinite).reduce((sum, l) => sum + (parseFloat(l.d) || 0), 0).toFixed(4))} mm
+              </div>
             </div>
 
             <div className="flex-1 flex flex-row border border-slate-300 shadow-inner rounded overflow-hidden bg-slate-50 min-h-0 relative">
