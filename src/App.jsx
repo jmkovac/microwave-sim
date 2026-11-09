@@ -81,8 +81,12 @@ function calculateTMM(f_GHz, layers, theta0_deg, polarization) {
   return { R: R_avg, T: 1 - R_avg };
 }
 
+// Stack-profile layer heights: proportional to thickness, but never shorter
+// than one line of label text so thin neighboring layers don't overlap
+const layerSizeStyle = (d) => ({ flex: `${d} 1 0px`, minHeight: '14px' });
+
 // --- Custom Interactive Chart Component ---
-const SimulationChart = ({ data, fMin, fMax, yAxisMode, yMin, yMax, passband, avgReflection }) => {
+const SimulationChart = ({ data, fMin, fMax, yAxisMode, yMin, yMax, passbands, avgReflection }) => {
   const [hoverInfo, setHoverInfo] = useState(null);
   const svgRef = useRef(null);
 
@@ -164,9 +168,15 @@ const SimulationChart = ({ data, fMin, fMax, yAxisMode, yMin, yMax, passband, av
     return data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${xScale(d.f)},${yScale(d.T)}`).join(' ');
   }, [data, fMin, fMax, yAxisMode, yMin, yMax]);
 
-  const pbStartX = passband?.enabled ? Math.max(margin.left, xScale(passband.min)) : 0;
-  const pbEndX = passband?.enabled ? Math.min(width - margin.right, xScale(passband.max)) : 0;
-  const showPassband = passband?.enabled && pbEndX > pbStartX && avgReflection !== null;
+  // Visible portion of each passband, in SVG x coordinates
+  const pbRects = avgReflection === null ? [] : passbands
+    .map(pb => ({
+      x0: Math.max(margin.left, xScale(pb.min)),
+      x1: Math.min(width - margin.right, xScale(pb.max)),
+    }))
+    .filter(r => r.x1 > r.x0);
+  // Label the combined average in the widest visible band
+  const labelRect = pbRects.reduce((best, r) => (!best || r.x1 - r.x0 > best.x1 - best.x0 ? r : best), null);
 
   return (
     <div className="relative w-full h-full flex items-center justify-center">
@@ -184,11 +194,13 @@ const SimulationChart = ({ data, fMin, fMax, yAxisMode, yMin, yMax, passband, av
           </clipPath>
         </defs>
 
-        {showPassband && (
+        {pbRects.length > 0 && (
           <g clipPath="url(#plotArea)">
-            <rect x={pbStartX} y={margin.top} width={pbEndX - pbStartX} height={plotH} fill="#ef4444" opacity="0.08" />
-            {(pbEndX - pbStartX) > 40 && (
-              <text x={(pbStartX + pbEndX) / 2} y={margin.top + 16} textAnchor="middle" className="text-[11px] font-bold fill-red-600">
+            {pbRects.map((r, i) => (
+              <rect key={i} x={r.x0} y={margin.top} width={r.x1 - r.x0} height={plotH} fill="#ef4444" opacity="0.08" />
+            ))}
+            {(labelRect.x1 - labelRect.x0) > 40 && (
+              <text x={(labelRect.x0 + labelRect.x1) / 2} y={margin.top + 16} textAnchor="middle" className="text-[11px] font-bold fill-red-600">
                 Avg R: {(avgReflection * 100).toFixed(1)}%
               </text>
             )}
@@ -266,6 +278,9 @@ export default function App() {
   const [passbandEnabled, setPassbandEnabled] = useState(false);
   const [passbandMin, setPassbandMin] = useState(10);
   const [passbandMax, setPassbandMax] = useState(20);
+  const [passband2Enabled, setPassband2Enabled] = useState(false);
+  const [passband2Min, setPassband2Min] = useState(30);
+  const [passband2Max, setPassband2Max] = useState(40);
 
   // Layers state
   const [layers, setLayers] = useState([
@@ -292,6 +307,9 @@ export default function App() {
         if (decoded.passbandEnabled !== undefined) setPassbandEnabled(decoded.passbandEnabled);
         if (decoded.passbandMin !== undefined) setPassbandMin(decoded.passbandMin);
         if (decoded.passbandMax !== undefined) setPassbandMax(decoded.passbandMax);
+        if (decoded.passband2Enabled !== undefined) setPassband2Enabled(decoded.passband2Enabled);
+        if (decoded.passband2Min !== undefined) setPassband2Min(decoded.passband2Min);
+        if (decoded.passband2Max !== undefined) setPassband2Max(decoded.passband2Max);
       } catch (e) {
         console.error("Failed to parse URL state");
       }
@@ -303,7 +321,8 @@ export default function App() {
     const state = {
       fMin, fMax, angle, polarization, yAxisMode,
       yMinLinear, yMaxLinear, yMinLog, yMaxLog,
-      layers, passbandEnabled, passbandMin, passbandMax
+      layers, passbandEnabled, passbandMin, passbandMax,
+      passband2Enabled, passband2Min, passband2Max
     };
     const encoded = btoa(JSON.stringify(state));
     const url = `${window.location.origin}${window.location.pathname}?state=${encoded}`;
@@ -330,19 +349,42 @@ export default function App() {
     return data;
   }, [fMin, fMax, angle, polarization, layers, isLoaded]);
 
+  // Active passbands as numeric [min, max] ranges
+  const passbands = useMemo(() => {
+    if (!passbandEnabled) return [];
+    const toBand = (lo, hi) => {
+      const min = Math.max(0, parseFloat(lo) || 0);
+      return { min, max: Math.max(min + 0.001, parseFloat(hi) || 1) };
+    };
+    const bands = [toBand(passbandMin, passbandMax)];
+    if (passband2Enabled) bands.push(toBand(passband2Min, passband2Max));
+    return bands;
+  }, [passbandEnabled, passbandMin, passbandMax, passband2Enabled, passband2Min, passband2Max]);
+
+  // Average R over the union of the passbands, weighted by bandwidth
+  // (overlapping bands are merged so no frequency is counted twice)
   const avgReflection = useMemo(() => {
-    if (!passbandEnabled) return null;
-    const start = Math.max(0, parseFloat(passbandMin) || 0);
-    const end = Math.max(start + 0.001, parseFloat(passbandMax) || 1);
-    const points = 200;
-    let sumR = 0;
-    for (let i = 0; i <= points; i++) {
-      const f = start + (i / points) * (end - start);
-      const res = calculateTMM(f, layers, angle, polarization);
-      sumR += res.R;
+    if (passbands.length === 0) return null;
+    const merged = [];
+    for (const b of [...passbands].sort((a, b) => a.min - b.min)) {
+      const last = merged[merged.length - 1];
+      if (last && b.min <= last.max) last.max = Math.max(last.max, b.max);
+      else merged.push({ ...b });
     }
-    return sumR / (points + 1);
-  }, [passbandEnabled, passbandMin, passbandMax, layers, angle, polarization]);
+    const points = 200;
+    let weightedSum = 0;
+    let totalWidth = 0;
+    for (const { min, max } of merged) {
+      let sumR = 0;
+      for (let i = 0; i <= points; i++) {
+        const f = min + (i / points) * (max - min);
+        sumR += calculateTMM(f, layers, angle, polarization).R;
+      }
+      weightedSum += (sumR / (points + 1)) * (max - min);
+      totalWidth += max - min;
+    }
+    return weightedSum / totalWidth;
+  }, [passbands, layers, angle, polarization]);
 
   const addLayer = () => {
     const newId = layers.length > 0 ? Math.max(...layers.map(l => l.id)) + 1 : 1;
@@ -363,7 +405,7 @@ export default function App() {
         <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-2 gap-4">
           <div className="flex items-center space-x-3">
             <Activity className="w-6 h-6 text-blue-600" />
-            <h1 className="text-xl font-bold text-slate-900 leading-tight">Microwave Multilayer TMM Simulator</h1>
+            <h1 className="text-xl font-bold text-slate-900 leading-tight">Microwave Multilayer TMM Simulator - Kovac CMB Group</h1>
           </div>
           <button 
             onClick={handleShareLink}
@@ -400,7 +442,7 @@ export default function App() {
                 yAxisMode={yAxisMode}
                 yMin={activeYMin}
                 yMax={activeYMax}
-                passband={{ enabled: passbandEnabled, min: passbandMin, max: passbandMax }}
+                passbands={passbands}
                 avgReflection={avgReflection}
               />
             </div>
@@ -422,11 +464,9 @@ export default function App() {
                 {(() => {
                   const finiteLayers = layers.filter(l => !l.isInfinite);
                   const maxFiniteD = Math.max(...finiteLayers.map(l => parseFloat(l.d) || 0), 0.1);
-                  const stackSum = layers.reduce((sum, l) => sum + (l.isInfinite ? maxFiniteD : (parseFloat(l.d) || 0)), 0);
 
                   return layers.map((layer, idx) => {
                     const d = layer.isInfinite ? maxFiniteD : (parseFloat(layer.d) || 0);
-                    const heightPct = stackSum > 0 ? (d / stackSum) * 100 : 0;
                     
                     const n = parseFloat(layer.n) || 1;
                     const intensity = Math.min(1, Math.max(0, (n - 1) / 9)); 
@@ -438,14 +478,14 @@ export default function App() {
                       <div 
                         key={layer.id} 
                         style={{ 
-                          height: `${heightPct}%`, 
+                          ...layerSizeStyle(d),
                           backgroundColor: `hsl(215, 60%, ${lightness}%)`,
                           backgroundImage: layer.isInfinite ? 'repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,0.1) 5px, rgba(0,0,0,0.1) 10px)' : 'none'
                         }}
                         className="w-full border-b border-slate-900/10 flex items-center justify-center relative group"
                         title={`${customLabel}: ${layer.isInfinite ? '∞' : d + 'mm'}, n=${layer.n}`}
                       >
-                        <div className={`text-[10px] font-bold ${textColor} whitespace-nowrap overflow-visible absolute inset-x-0 text-center px-1`}>
+                        <div className={`text-[10px] font-bold ${textColor} whitespace-nowrap overflow-visible absolute inset-x-0 z-10 text-center px-1`}>
                           {customLabel} (n={layer.n})
                         </div>
                       </div>
@@ -459,13 +499,11 @@ export default function App() {
                 {(() => {
                   const finiteLayers = layers.filter(l => !l.isInfinite);
                   const maxFiniteD = Math.max(...finiteLayers.map(l => parseFloat(l.d) || 0), 0.1);
-                  const stackSum = layers.reduce((sum, l) => sum + (l.isInfinite ? maxFiniteD : (parseFloat(l.d) || 0)), 0);
 
                   return layers.map(layer => {
                     const d = layer.isInfinite ? maxFiniteD : (parseFloat(layer.d) || 0);
-                    const heightPct = stackSum > 0 ? (d / stackSum) * 100 : 0;
                     return (
-                      <div key={layer.id} style={{ height: `${heightPct}%` }} className="w-full border-b border-slate-200 flex items-center pl-1.5">
+                      <div key={layer.id} style={layerSizeStyle(d)} className="w-full border-b border-slate-200 flex items-center pl-1.5">
                          <span className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
                            {layer.isInfinite ? '∞ mm' : `${d} mm`}
                          </span>
@@ -601,17 +639,35 @@ export default function App() {
               {passbandEnabled && (
                 <div className="flex flex-col gap-2 mt-2">
                   <div className="flex space-x-2">
-                    <input type="number" value={passbandMin} onChange={e => setPassbandMin(e.target.value)} className="w-1/2 p-1.5 text-xs border border-slate-300 rounded" placeholder="Min GHz" />
-                    <input type="number" value={passbandMax} onChange={e => setPassbandMax(e.target.value)} className="w-1/2 p-1.5 text-xs border border-slate-300 rounded" placeholder="Max GHz" />
+                    <input type="number" value={passbandMin} onChange={e => setPassbandMin(e.target.value)} className="w-full min-w-0 p-1.5 text-xs border border-slate-300 rounded" />
+                    <span className="text-slate-400 text-xs self-center">to</span>
+                    <input type="number" value={passbandMax} onChange={e => setPassbandMax(e.target.value)} className="w-full min-w-0 p-1.5 text-xs border border-slate-300 rounded" />
+                    <span className="text-slate-500 text-xs self-center">GHz</span>
                   </div>
+                  <label className="flex items-center space-x-2 cursor-pointer text-xs text-slate-600">
+                    <input type="checkbox" checked={passband2Enabled} onChange={e => setPassband2Enabled(e.target.checked)} className="rounded text-blue-600" />
+                    <span>Add second passband</span>
+                  </label>
+                  {passband2Enabled && (
+                    <div className="flex space-x-2">
+                      <input type="number" value={passband2Min} onChange={e => setPassband2Min(e.target.value)} className="w-full min-w-0 p-1.5 text-xs border border-slate-300 rounded" />
+                      <span className="text-slate-400 text-xs self-center">to</span>
+                      <input type="number" value={passband2Max} onChange={e => setPassband2Max(e.target.value)} className="w-full min-w-0 p-1.5 text-xs border border-slate-300 rounded" />
+                      <span className="text-slate-500 text-xs self-center">GHz</span>
+                    </div>
+                  )}
                   <div className="bg-white border border-red-200 p-1.5 rounded text-center">
-                    <span className="text-xs font-bold text-red-500">Avg R: {avgReflection !== null ? (avgReflection * 100).toFixed(2) + '%' : '-'}</span>
+                    <span className="text-xs font-bold text-red-500">{passbands.length > 1 ? 'Combined ' : ''}Avg R: {avgReflection !== null ? (avgReflection * 100).toFixed(2) + '%' : '-'}</span>
                   </div>
                 </div>
               )}
             </div>
           </div>
         </div>
+
+        <footer className="text-center text-[10px] text-slate-400 pb-2">
+          Last updated November 9, 2026 by John Kovac; code generated and maintained using Gemini and Claude
+        </footer>
       </div>
     </div>
   );
