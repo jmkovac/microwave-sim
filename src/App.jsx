@@ -385,10 +385,21 @@ export default function App() {
     return weightedSum / totalWidth;
   }, [passbands, layers, angle, polarization]);
 
+  // 'end', or the id of the layer the new layer is inserted before
+  const [insertBefore, setInsertBefore] = useState('end');
+  const insertTarget = layers.some(l => l.id === insertBefore) ? insertBefore : 'end';
+
   const addLayer = () => {
     const newId = layers.length > 0 ? Math.max(...layers.map(l => l.id)) + 1 : 1;
-    const cleanLayers = layers.map(l => ({...l, isInfinite: false}));
-    setLayers([...cleanLayers, { id: newId, label: '', d: 1.0, n: 1.5, isInfinite: false }]);
+    const newLayer = { id: newId, label: '', d: 1.0, n: 1.5, isInfinite: false };
+    if (insertTarget === 'end') {
+      // Appending makes the new layer last, so no earlier layer can stay semi-infinite
+      const cleanLayers = layers.map(l => ({...l, isInfinite: false}));
+      setLayers([...cleanLayers, newLayer]);
+    } else {
+      const idx = layers.findIndex(l => l.id === insertTarget);
+      setLayers([...layers.slice(0, idx), newLayer, ...layers.slice(idx)]);
+    }
   };
 
   const removeLayer = (id) => setLayers(layers.filter(l => l.id !== id));
@@ -528,9 +539,22 @@ export default function App() {
               <Layers className="w-4 h-4 text-slate-600" />
               <h2 className="text-sm font-semibold text-slate-800">Dielectric Stack</h2>
             </div>
-            <button onClick={addLayer} className="flex items-center space-x-1 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded transition-colors border border-blue-200">
-              <Plus className="w-3 h-3" /><span>Add Layer</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <select
+                value={insertTarget}
+                onChange={e => setInsertBefore(e.target.value === 'end' ? 'end' : Number(e.target.value))}
+                className="p-1.5 text-xs border border-slate-300 rounded bg-white text-slate-700"
+                title="Where the new layer is inserted"
+              >
+                <option value="end">At end</option>
+                {layers.map((layer, idx) => (
+                  <option key={layer.id} value={layer.id}>Before {layer.label || `Layer ${idx + 1}`}</option>
+                ))}
+              </select>
+              <button onClick={addLayer} className="flex items-center space-x-1 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded transition-colors border border-blue-200">
+                <Plus className="w-3 h-3" /><span>Add Layer</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
