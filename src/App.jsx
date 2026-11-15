@@ -85,6 +85,14 @@ function calculateTMM(f_GHz, layers, theta0_deg, polarization) {
   return { R: R_avg, T: 1 - R_avg };
 }
 
+// Format a fraction as a percentage with `decimals` places, switching to two
+// significant figures when that would show fewer digits (e.g. 0.0044%).
+const formatPercent = (v, decimals) => {
+  const pct = v * 100;
+  if (pct === 0) return '0%';
+  return (pct >= Math.pow(10, 1 - decimals) ? pct.toFixed(decimals) : pct.toPrecision(2)) + '%';
+};
+
 // Stack-profile layer heights: strictly proportional to thickness (true scale)
 const layerSizeStyle = (d) => ({ flex: `${d} 1 0px`, minHeight: 0 });
 
@@ -217,7 +225,7 @@ const SimulationChart = ({ data, fMin, fMax, yAxisMode, yMin, yMax, passbands, a
             ))}
             {(labelRect.x1 - labelRect.x0) > 40 && (
               <text x={(labelRect.x0 + labelRect.x1) / 2} y={margin.top + 16} textAnchor="middle" className="text-[11px] font-bold fill-red-600">
-                Avg R: {(avgReflection * 100).toFixed(1)}%
+                Avg R: {formatPercent(avgReflection, 1)}
               </text>
             )}
           </g>
@@ -816,7 +824,7 @@ export default function App() {
                     </div>
                   )}
                   <div className="bg-white border border-red-200 p-1.5 rounded text-center">
-                    <span className="text-xs font-bold text-red-500">{passbands.length > 1 ? 'Combined ' : ''}Avg R: {avgReflection !== null ? (avgReflection * 100).toFixed(2) + '%' : '-'}</span>
+                    <span className="text-xs font-bold text-red-500">{passbands.length > 1 ? 'Combined ' : ''}Avg R: {avgReflection !== null ? formatPercent(avgReflection, 2) : '-'}</span>
                   </div>
                 </div>
               )}
@@ -843,8 +851,8 @@ export default function App() {
                 </tbody>
               </table>
               <p>
-                Passband average reflection at normal incidence: <b>{(chebDialog.avgR * 100).toPrecision(3)}%</b>
-                <span className="text-slate-500"> (textbook design with ripple edges at the passband edges: {(chebDialog.textbookAvgR * 100).toPrecision(3)}%)</span>
+                Passband average reflection at normal incidence: <b>{formatPercent(chebDialog.avgR, 2)}</b>
+                <span className="text-slate-500"> (textbook design with ripple edges at the passband edges: {formatPercent(chebDialog.textbookAvgR, 2)})</span>
               </p>
               {parseFloat(angle) !== 0 && (
                 <p className="text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
