@@ -297,6 +297,9 @@ export default function App() {
   const [passband2Min, setPassband2Min] = useState(30);
   const [passband2Max, setPassband2Max] = useState(40);
 
+  // Optional stack name (shown in the main plot title)
+  const [stackName, setStackName] = useState('');
+
   // Layers state
   const [layers, setLayers] = useState([
     { id: 1, label: '', d: 2.5, n: 2.1, isInfinite: false }
@@ -308,7 +311,14 @@ export default function App() {
     const stateParam = params.get('state');
     if (stateParam) {
       try {
-        const decoded = JSON.parse(atob(stateParam));
+        // Links are UTF-8 encoded (so names may contain any characters);
+        // fall back to the raw string for older Latin-1 links.
+        // (Older links weren't URL-escaped, so a '+' arrives as a space.)
+        const raw = atob(stateParam.replace(/ /g, '+'));
+        let text;
+        try { text = decodeURIComponent(escape(raw)); } catch { text = raw; }
+        const decoded = JSON.parse(text);
+        if (typeof decoded.stackName === 'string') setStackName(decoded.stackName);
         if (decoded.fMin !== undefined) setFMin(decoded.fMin);
         if (decoded.fMax !== undefined) setFMax(decoded.fMax);
         if (decoded.angle !== undefined) setAngle(decoded.angle);
@@ -336,10 +346,10 @@ export default function App() {
     const state = {
       fMin, fMax, angle, polarization, yAxisMode,
       yMinLinear, yMaxLinear, yMinLog, yMaxLog,
-      layers, passbandEnabled, passbandMin, passbandMax,
+      stackName, layers, passbandEnabled, passbandMin, passbandMax,
       passband2Enabled, passband2Min, passband2Max
     };
-    const encoded = btoa(JSON.stringify(state));
+    const encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(state)))));
     const url = `${window.location.origin}${window.location.pathname}?state=${encoded}`;
     navigator.clipboard.writeText(url);
     setCopiedLink(true);
@@ -451,7 +461,7 @@ export default function App() {
         <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-2 gap-4">
           <div className="flex items-center space-x-3">
             <Activity className="w-6 h-6 text-blue-600" />
-            <h1 className="text-xl font-bold text-slate-900 leading-tight">Microwave Multilayer TMM Simulator - Kovac CMB Group</h1>
+            <h1 className="text-xl font-bold text-slate-900 leading-tight">Kovac CMB Group: Microwave Multilayer TMM Simulator</h1>
           </div>
           <button 
             onClick={handleShareLink}
@@ -468,7 +478,7 @@ export default function App() {
           {/* Left: Main Chart */}
           <div className="flex-1 bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
             <div className="flex justify-between items-center mb-2 shrink-0">
-              <h2 className="text-md font-bold text-slate-800">Transmission & Reflection Spectrum</h2>
+              <h2 className="text-md font-bold text-slate-800">Transmission & Reflection Spectrum{stackName.trim() ? `: ${stackName.trim()}` : ''}</h2>
               <div className="flex space-x-4 text-xs">
                 <div className="flex items-center space-x-1.5">
                   <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
@@ -573,7 +583,15 @@ export default function App() {
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
             <div className="flex items-center space-x-2">
               <Layers className="w-4 h-4 text-slate-600" />
-              <h2 className="text-sm font-semibold text-slate-800">Dielectric Stack</h2>
+              <h2 className="text-sm font-semibold text-slate-800 whitespace-nowrap">Dielectric Stack</h2>
+              <input
+                type="text"
+                value={stackName}
+                onChange={e => setStackName(e.target.value)}
+                placeholder="Stack Name"
+                title="Optional name, shown in the plot title"
+                className="ml-2 p-1.5 w-48 text-xs border border-slate-300 rounded bg-white text-slate-700"
+              />
             </div>
             <div className="flex items-center space-x-2">
               <select
@@ -746,7 +764,7 @@ export default function App() {
         </div>
 
         <footer className="text-center text-[10px] text-slate-400 pb-2">
-          Last updated November 9, 2026 by John Kovac; code generated and maintained using Gemini and Claude
+          Last updated November 15, 2026 by John Kovac; code generated and maintained using Gemini and Claude
         </footer>
       </div>
     </div>
