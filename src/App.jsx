@@ -3,6 +3,7 @@ import { Settings2, Layers, Plus, Trash2, Activity, Info, Link as LinkIcon, Chec
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { designChebyshev } from './chebyshev';
 
 const SPEED_OF_LIGHT = 299792458; // m/s
 
@@ -411,6 +412,50 @@ export default function App() {
     return weightedSum / totalWidth;
   }, [passbands, layers, angle, polarization]);
 
+  // --- Ideal Chebyshev solution ---
+  // Reason the button is disabled, or null when a design can be computed.
+  const chebDisabledReason = (() => {
+    if (layers.length === 0 || !layers[layers.length - 1].isInfinite) return 'Requires the final layer to be a semi-infinite substrate';
+    if (layers.length < 2) return 'Requires at least one layer above the substrate';
+    if (!passbandEnabled) return 'Requires Passband Average Reflection to be enabled';
+    if (passband2Enabled) return 'Not available with a second passband';
+    const lo = parseFloat(passbandMin), hi = parseFloat(passbandMax);
+    if (!(lo > 0) || !(hi > lo)) return 'Requires passband bounds with 0 < min < max';
+    return null;
+  })();
+
+  const [chebDialog, setChebDialog] = useState(null); // proposed design, shown for confirmation
+  const [chebUndo, setChebUndo] = useState(null);     // { before, after } layer lists
+
+  const openChebyshev = () => {
+    const substrate = layers[layers.length - 1];
+    const nSub = parseFloat(substrate.n) || 1;
+    const fLo = parseFloat(passbandMin), fHi = parseFloat(passbandMax);
+    const N = layers.length - 1;
+    // Exact passband-average reflection at normal incidence for a candidate stack
+    const avgR = (cand) => {
+      const stack = [...cand.map(l => ({ ...l, isInfinite: false })), substrate];
+      const points = 200;
+      let sum = 0;
+      for (let i = 0; i <= points; i++) sum += calculateTMM(fLo + (i / points) * (fHi - fLo), stack, 0, 'Unpolarized').R;
+      return sum / (points + 1);
+    };
+    setChebDialog({ ...designChebyshev(N, nSub, fLo, fHi, avgR), nSub, fLo, fHi });
+  };
+
+  const applyChebyshev = () => {
+    const newLayers = [
+      ...chebDialog.layers.map((l, i) => ({ id: layers[i].id, label: `Chebyshev layer ${i + 1}`, d: l.d, n: l.n, isInfinite: false })),
+      layers[layers.length - 1],
+    ];
+    setChebUndo({ before: layers, after: newLayers });
+    setLayers(newLayers);
+    setChebDialog(null);
+  };
+
+  // Undo is offered only until the stack is edited further
+  const canUndoCheb = chebUndo !== null && chebUndo.after === layers;
+
   // 'end', or the id of the layer the new layer is inserted before
   const [insertBefore, setInsertBefore] = useState('end');
   const insertTarget = layers.some(l => l.id === insertBefore) ? insertBefore : 'end';
@@ -633,7 +678,7 @@ export default function App() {
                       placeholder={`Layer ${index + 1}`}
                       value={layer.label}
                       onChange={e => updateLayer(layer.id, 'label', e.target.value)}
-                      className="text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded px-1.5 py-0.5 w-24 focus:outline-none focus:border-blue-500"
+                      className="text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded px-1.5 py-0.5 w-32 focus:outline-none focus:border-blue-500"
                     />
                     </div>
                     <button onClick={() => removeLayer(layer.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -727,6 +772,22 @@ export default function App() {
                   <option value="TM">TM (p-polarized)</option>
                 </select>
               </div>
+              <div>
+                <button
+                  onClick={openChebyshev}
+                  disabled={chebDisabledReason !== null}
+                  title={chebDisabledReason ?? 'Design an equal-ripple (Chebyshev) quarter-wave stack for the passband'}
+                  className="w-full px-3 py-1.5 text-xs font-semibold rounded border transition-colors text-blue-600 bg-blue-50 border-blue-200 hover:bg-blue-100 disabled:text-slate-400 disabled:bg-slate-50 disabled:border-slate-200 disabled:cursor-not-allowed"
+                >
+                  Calculate Ideal Chebyshev Solution
+                </button>
+                {chebDisabledReason && <p className="mt-1 text-[10px] text-slate-400">{chebDisabledReason}</p>}
+                {canUndoCheb && (
+                  <button onClick={() => { setLayers(chebUndo.before); setChebUndo(null); }} className="mt-1 text-[11px] text-blue-600 hover:underline">
+                    Undo Chebyshev replacement
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
@@ -762,6 +823,41 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {chebDialog && (
+          <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4" onClick={() => setChebDialog(null)}>
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-md w-full p-5 space-y-3 text-xs text-slate-700" onClick={e => e.stopPropagation()}>
+              <h3 className="text-sm font-bold text-slate-900">Ideal Chebyshev Solution</h3>
+              <p>
+                Replace all {chebDialog.layers.length} layer{chebDialog.layers.length > 1 ? 's' : ''} above the substrate (<i>n</i> = {chebDialog.nSub}) with
+                the equal-ripple quarter-wave design that minimizes the average reflection over {chebDialog.fLo}–{chebDialog.fHi} GHz?
+              </p>
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500"><th className="py-1 font-medium">Layer</th><th className="py-1 font-medium"><i>n</i></th><th className="py-1 font-medium"><i>d</i> (mm)</th></tr>
+                </thead>
+                <tbody>
+                  {chebDialog.layers.map((l, i) => (
+                    <tr key={i} className="border-b border-slate-100"><td className="py-1">Chebyshev layer {i + 1}</td><td className="py-1">{l.n.toFixed(3)}</td><td className="py-1">{l.d.toFixed(3)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+              <p>
+                Passband average reflection at normal incidence: <b>{(chebDialog.avgR * 100).toPrecision(3)}%</b>
+                <span className="text-slate-500"> (textbook design with ripple edges at the passband edges: {(chebDialog.textbookAvgR * 100).toPrecision(3)}%)</span>
+              </p>
+              {parseFloat(angle) !== 0 && (
+                <p className="text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                  The design is for normal incidence; the plot will show its response at the current angle ({angle}°).
+                </p>
+              )}
+              <div className="flex justify-end space-x-2 pt-1">
+                <button onClick={() => setChebDialog(null)} className="px-3 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 font-semibold">Cancel</button>
+                <button onClick={applyChebyshev} className="px-3 py-1.5 rounded border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 font-semibold">Replace Layers</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <footer className="text-center text-[10px] text-slate-400 pb-2">
           Last updated November 15, 2026 by John Kovac; code generated and maintained using Gemini and Claude
