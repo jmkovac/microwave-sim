@@ -643,7 +643,7 @@ export default function App() {
                     <div className="py-3 text-center text-[11px] font-semibold text-indigo-500 bg-indigo-50/50 rounded border border-indigo-100">∞ Thickness (Exit Medium)</div>
                   ) : (
                     <div>
-                      <label className="text-[11px] font-medium text-slate-700 mb-1 block">Thickness $d$ (mm)</label>
+                      <label className="text-[11px] font-medium text-slate-700 mb-1 block">Thickness <i>d</i> (mm)</label>
                       <div className="flex items-center space-x-2">
                         <input type="range" min="0.1" max="50" step="0.1" value={layer.d} onChange={e => updateLayer(layer.id, 'd', e.target.value)} className="flex-1 accent-slate-600" />
                         <input type="number" min="0.1" step="0.1" value={layer.d} onChange={e => updateLayer(layer.id, 'd', e.target.value)} className="w-16 p-1 text-xs border border-slate-300 rounded text-center" />
@@ -652,7 +652,7 @@ export default function App() {
                   )}
 
                   <div>
-                    <label className="text-[11px] font-medium text-slate-700 mb-1 block">Refractive Index $n$</label>
+                    <label className="text-[11px] font-medium text-slate-700 mb-1 block">Refractive Index <i>n</i></label>
                     <div className="flex items-center space-x-2">
                       <input type="range" min="1" max="10" step="0.01" value={layer.n} onChange={e => updateLayer(layer.id, 'n', e.target.value)} className="flex-1 accent-slate-600" />
                       <input type="number" min="1" step="0.01" value={layer.n} onChange={e => updateLayer(layer.id, 'n', e.target.value)} className="w-16 p-1 text-xs border border-slate-300 rounded text-center" />
